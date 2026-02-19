@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-joblib
+pandas
 scikit-learn==1.6.1
-category_encoders
 xgboost
-numpy
+category_encoders
+joblib
