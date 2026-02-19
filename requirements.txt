@@ -6,3 +6,4 @@ scikit-learn
 joblib
 category_encoders
 xgboost
+statsmodels
