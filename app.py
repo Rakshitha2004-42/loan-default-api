@@ -5,11 +5,11 @@ import pandas as pd
 
 app = FastAPI(title="Loan Default Prediction API")
 
-# Load trained pipeline
+# load trained pipeline
 pipeline = joblib.load("loan_default_full_pipeline.pkl")
 
 
-# ----------- INPUT SCHEMA (RAW USER INPUT) -----------
+# ---------- INPUT SCHEMA ----------
 class LoanInput(BaseModel):
     Age: float
     Income: float
@@ -29,80 +29,56 @@ class LoanInput(BaseModel):
     HasCoSigner: str
 
 
-# ----------- CATEGORY MAPPINGS -----------
-education_map = {
-    "High School": 0,
-    "Bachelor": 1,
-    "Master": 2,
-    "PhD": 3
-}
-
-employment_map = {
-    "Unemployed": 0,
-    "Part-time": 1,
-    "Full-time": 2,
-    "Self-employed": 3
-}
-
-marital_map = {
-    "Single": 0,
-    "Married": 1,
-    "Divorced": 2
-}
-
-yes_no_map = {
-    "No": 0,
-    "Yes": 1
-}
-
-purpose_map = {
-    "Personal": 0,
-    "Home": 1,
-    "Auto": 2,
-    "Education": 3,
-    "Business": 4
-}
-
-
-# ----------- HOME ROUTE -----------
+# ---------- HOME ----------
 @app.get("/")
 def home():
     return {"message": "Loan Default Prediction API running"}
 
 
-# ----------- PREDICTION ROUTE -----------
+# ---------- FEATURE ENGINEERING ----------
+def create_features(df: pd.DataFrame) -> pd.DataFrame:
+
+    df["Loan_to_Income"] = df["LoanAmount"] / df["Income"]
+    df["LoanTerm_to_Income"] = df["LoanTerm"] / df["Income"]
+    df["EMI_Burden"] = df["LoanAmount"] / df["LoanTerm"]
+    df["Debt_Stress"] = df["DTIRatio"] * df["InterestRate"]
+
+    df["Income_per_CreditLine"] = df["Income"] / df["NumCreditLines"]
+    df["Loan_per_CreditLine"] = df["LoanAmount"] / df["NumCreditLines"]
+
+    df["Employment_Stability"] = df["MonthsEmployed"] / (df["Age"] + 1)
+    df["LoanTerm_per_Age"] = df["LoanTerm"] / (df["Age"] + 1)
+
+    # Credit score band
+    df["CreditScore_Band"] = pd.cut(
+        df["CreditScore"],
+        bins=[0, 580, 670, 740, 800, 900],
+        labels=[0, 1, 2, 3, 4]
+    ).astype(int)
+
+    df["LowCredit_HighDTI"] = ((df["CreditScore"] < 600) & (df["DTIRatio"] > 0.4)).astype(int)
+    df["Unemployed_HighLoan"] = ((df["EmploymentType"] == "Unemployed") & (df["LoanAmount"] > 20000)).astype(int)
+    df["HighInterest_LongTerm"] = ((df["InterestRate"] > 0.12) & (df["LoanTerm"] > 36)).astype(int)
+
+    return df
+
+
+# ---------- PREDICT ----------
 @app.post("/predict")
 def predict(data: LoanInput):
 
-    # Convert categorical text → numeric
-    processed_data = {
-        "Age": data.Age,
-        "Income": data.Income,
-        "LoanAmount": data.LoanAmount,
-        "CreditScore": data.CreditScore,
-        "MonthsEmployed": data.MonthsEmployed,
-        "NumCreditLines": data.NumCreditLines,
-        "InterestRate": data.InterestRate,
-        "LoanTerm": data.LoanTerm,
-        "DTIRatio": data.DTIRatio,
-        "Education": education_map.get(data.Education, 0),
-        "EmploymentType": employment_map.get(data.EmploymentType, 0),
-        "MaritalStatus": marital_map.get(data.MaritalStatus, 0),
-        "HasMortgage": yes_no_map.get(data.HasMortgage, 0),
-        "HasDependents": yes_no_map.get(data.HasDependents, 0),
-        "LoanPurpose": purpose_map.get(data.LoanPurpose, 0),
-        "HasCoSigner": yes_no_map.get(data.HasCoSigner, 0),
-    }
+    # convert input → dataframe
+    df = pd.DataFrame([data.model_dump()])
 
-    # Convert to DataFrame (required for sklearn pipeline)
-    df = pd.DataFrame([processed_data])
+    # create engineered features
+    df = create_features(df)
 
-    # Prediction
+    # predict
     prob = pipeline.predict_proba(df)[:, 1][0]
     pred = int(prob >= 0.20)
 
     return {
-        "default_probability": round(float(prob), 4),
+        "default_probability": float(round(prob, 4)),
         "prediction": pred,
         "result": "Default Risk" if pred else "Safe Loan"
     }
