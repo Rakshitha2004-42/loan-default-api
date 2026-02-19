@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 pandas
-scikit-learn==1.6.1
-xgboost
-category_encoders
+numpy
+scikit-learn
 joblib
+category_encoders
+xgboost
